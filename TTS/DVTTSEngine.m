@@ -65,25 +65,13 @@ static NSString *const kDVEndpoint = @"wss://openspeech.bytedance.com/api/v3/tts
     }
     _sentIndex = 0;
     _sessionId = nil;
+    // 播放器延迟到 SessionStarted 才建，这里不碰音频
 
     NSMutableDictionary *h = [NSMutableDictionary dictionary];
     h[@"X-Api-Key"] = key;
     h[@"X-Api-Resource-Id"] = [s resourceId];
     h[@"X-Api-Connect-Id"] = [NSUUID UUID].UUIDString;
     h[@"X-Control-Require-Usage-Tokens-Return"] = @"*";
-
-    _player = [[DVAudioPlayer alloc] initWithSampleRate:(double)_sampleRate];
-    if (!_player) {
-        _active = NO;
-        [self fail:@"音频引擎初始化失败"];
-        return;
-    }
-
-    __weak typeof(self) weakSelf = self;
-    _player.onDrained = ^{
-        __strong typeof(weakSelf) self = weakSelf;
-        if (self) [self finishAll];
-    };
 
     _ws = [[DVWebSocket alloc] initWithURL:kDVEndpoint headers:h];
     [_ws connectWithDelegate:self];
@@ -131,6 +119,26 @@ static NSString *const kDVEndpoint = @"wss://openspeech.bytedance.com/api/v3/tts
     _finishBlock = nil;
 }
 
+#pragma mark - 按需建播放器
+
+- (BOOL)dv_preparePlayer {
+    if (_player) return YES;
+
+    _player = [[DVAudioPlayer alloc] initWithSampleRate:(double)_sampleRate];
+    if (!_player) {
+        NSLog(@"[豆包语音] DVAudioPlayer 创建失败 sr=%d", _sampleRate);
+        [self fail:@"音频引擎初始化失败"];
+        return NO;
+    }
+
+    __weak typeof(self) weakSelf = self;
+    _player.onDrained = ^{
+        __strong typeof(weakSelf) self = weakSelf;
+        if (self) [self finishAll];
+    };
+    return YES;
+}
+
 #pragma mark - DVWebSocketDelegate
 
 - (void)dvWSDidOpenWithLogId:(NSString *)logId {
@@ -159,8 +167,11 @@ static NSString *const kDVEndpoint = @"wss://openspeech.bytedance.com/api/v3/tts
         }
 
         case DVEventSessionStarted:
-            [_player start];
-            [self sendNextChunk];
+            // 这时候才开始建音频管道
+            if ([self dv_preparePlayer]) {
+                [_player start];
+                [self sendNextChunk];
+            }
             break;
 
         case DVEventSessionFailed:
@@ -175,7 +186,7 @@ static NSString *const kDVEndpoint = @"wss://openspeech.bytedance.com/api/v3/tts
             break;
 
         case DVEventTTSResponse:
-            if (m.payload.length) [_player appendPCM:m.payload];
+            if (m.payload.length && _player) [_player appendPCM:m.payload];
             break;
 
         case DVEventUsageResponse: {
@@ -186,7 +197,8 @@ static NSString *const kDVEndpoint = @"wss://openspeech.bytedance.com/api/v3/tts
 
         case DVEventSessionFinished:
             [self sendFinishSession];
-            [_player finish];
+            if (_player) [_player finish];
+            else [self finishAll];
             [self status:@"合成完成"];
             break;
 
