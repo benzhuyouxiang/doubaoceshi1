@@ -4,156 +4,69 @@
 
 #import "Prefs/DVStore.h"
 #import "UI/DVHUD.h"
-#import "UI/DVMenuController.h"
 
-// 所有要用的 selector 必须先声明，Logos 预处理才认得
-@interface DVMenuTarget : NSObject
-+ (instancetype)shared;
-- (void)dvRead:(id)sender;
-- (NSString *)dv_selectedText;
-- (UIResponder *)dv_findResponder;
-@end
+#pragma mark - 探测：扫所有含 Menu 的类
 
-@interface NSObject (DVMenuActions)
-- (void)dvRead:(id)sender;
-@end
+static void dv_dump_menu_classes(void) {
+    int count = objc_getClassList(NULL, 0);
+    if (count <= 0) return;
+    Class *classes = (Class *)malloc(sizeof(Class) * count);
+    objc_getClassList(classes, count);
 
-@implementation DVMenuTarget
-
-+ (instancetype)shared {
-    static DVMenuTarget *t = nil;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ t = [DVMenuTarget new]; });
-    return t;
-}
-
-- (UIResponder *)dv_findOne:(UIView *)v {
-    if (v.isFirstResponder) return v;
-    for (UIView *sub in v.subviews) {
-        UIResponder *r = [self dv_findOne:sub];
-        if (r) return r;
-    }
-    return nil;
-}
-
-- (UIResponder *)dv_findResponder {
-    for (UIWindow *w in [UIApplication sharedApplication].windows) {
-        UIResponder *r = [self dv_findOne:w];
-        if (r) return r;
-    }
-    return nil;
-}
-
-- (NSString *)dv_selectedText {
-    UIResponder *r = [self dv_findResponder];
-    if (!r) return nil;
-    @try {
-        if ([r isKindOfClass:[UITextView class]]) {
-            UITextView *tv = (UITextView *)r;
-            UITextRange *range = tv.selectedTextRange;
-            if (range) {
-                NSString *s = [tv textInRange:range];
-                if (s.length) return s;
-            }
-            return tv.text;
+    NSMutableArray *hits = [NSMutableArray array];
+    for (int i = 0; i < count; i++) {
+        NSString *name = NSStringFromClass(classes[i]);
+        if ([name containsString:@"Menu"] ||
+            [name containsString:@"Callout"] ||
+            [name containsString:@"Bar"] ||
+            [name containsString:@"Board"]) {
+            [hits addObject:name];
         }
-        if ([r isKindOfClass:[UITextField class]]) {
-            UITextField *tf = (UITextField *)r;
-            UITextRange *range = tf.selectedTextRange;
-            if (range) {
-                NSString *s = [tf textInRange:range];
-                if (s.length) return s;
-            }
-            return tf.text;
-        }
-    } @catch (NSException *e) {
-        NSLog(@"[豆包语音] 取文字异常 %@", e.reason);
     }
-    return nil;
-}
+    free(classes);
 
-- (void)dvRead:(id)sender {
-    NSLog(@"[豆包语音] 点了朗读");
-    NSString *txt = [self dv_selectedText];
-    if (txt.length == 0) {
-        txt = objc_getAssociatedObject([UIMenuController sharedMenuController],
-                                       "dv_last_text");
-    }
-    txt = [txt stringByTrimmingCharactersInSet:
-              [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if (txt.length == 0) {
-        [DVHUD showError:@"没拿到文字"];
-        return;
-    }
-    NSLog(@"[豆包语音] 朗读 %lu 字", (unsigned long)txt.length);
-    [DVMenuController readText:txt];
-}
-
-@end
-
-#pragma mark - 往菜单加一项
-
-static void dv_add_menu_items(void) {
-    @try {
-        UIMenuController *mc = [UIMenuController sharedMenuController];
-        NSArray *old = mc.menuItems;
-        NSMutableArray *arr = [NSMutableArray array];
-        for (UIMenuItem *it in old) {
-            if ([it.title isEqualToString:@"豆包朗读"]) continue;
-            [arr addObject:it];
-        }
-        [arr addObject:[[UIMenuItem alloc] initWithTitle:@"豆包朗读"
-                                                  action:@selector(dvRead:)]];
-        mc.menuItems = arr;
-        NSLog(@"[豆包语音] 菜单已写入 %lu 项", (unsigned long)arr.count);
-    } @catch (NSException *e) {
-        NSLog(@"[豆包语音] 写菜单异常 %@", e.reason);
+    NSLog(@"[豆包语音] ===== 含 Menu/Bar 的类 %lu 个 =====", (unsigned long)hits.count);
+    for (NSString *n in [hits sortedArrayUsingSelector:@selector(compare:)]) {
+        NSLog(@"[豆包语音]   %@", n);
     }
 }
 
-#pragma mark - hook UIMenuController
+#pragma mark - 探测：打印 UIMenuController 的 menuItems
+
+static void dv_probe_menuitems(void) {
+    UIMenuController *mc = [UIMenuController sharedMenuController];
+    NSLog(@"[豆包语音] UIMenuController.menuItems = %@", mc.menuItems);
+    NSLog(@"[豆包语音] UIMenuController 可见 = %d", mc.isMenuVisible);
+}
+
+#pragma mark - hook UIMenuController：打印每次 setMenuItems
 
 %hook UIMenuController
 
 - (void)setMenuItems:(NSArray *)items {
-    NSMutableArray *arr = [NSMutableArray array];
-    BOOL hasRead = NO;
-    for (UIMenuItem *it in items) {
-        if ([it.title isEqualToString:@"豆包朗读"]) { hasRead = YES; continue; }
-        [arr addObject:it];
-    }
-    if (!hasRead) {
-        [arr addObject:[[UIMenuItem alloc] initWithTitle:@"豆包朗读"
-                                                  action:@selector(dvRead:)]];
-    }
-    %orig(arr);
+    NSLog(@"[豆包语音] ★ setMenuItems 被调用，%lu 项: %@",
+          (unsigned long)items.count, items);
+    %orig;
 }
 
 - (void)setMenuVisible:(BOOL)visible animated:(BOOL)animated {
-    if (visible) {
-        @try {
-            NSString *t = [[DVMenuTarget shared] dv_selectedText];
-            if (t.length) {
-                objc_setAssociatedObject([UIMenuController sharedMenuController],
-                                         "dv_last_text", t,
-                                         OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-            }
-        } @catch (NSException *e) {}
-    }
+    NSLog(@"[豆包语音] ★ setMenuVisible=%d", visible);
+    %orig;
+}
+
+- (void)update {
+    NSLog(@"[豆包语音] ★ UIMenuController update 被调用");
     %orig;
 }
 
 %end
 
-#pragma mark - 让菜单项可点
+#pragma mark - 探测：hook 微信可能用的菜单类
 
-%hook UIResponder
+%hook NSObject
 
-- (BOOL)canPerformAction:(SEL)action withSender:(id)sender {
-    if (action == @selector(dvRead:)) {
-        return YES;
-    }
-    return %orig;
++ (void)load {
+    %orig;
 }
 
 %end
@@ -162,12 +75,14 @@ static void dv_add_menu_items(void) {
 
 %ctor {
     @autoreleasepool {
-        NSLog(@"[豆包语音] v2.0.1 已加载 pid=%d", getpid());
+        NSLog(@"[豆包语音] 探测版 pid=%d 已加载", getpid());
         [DVStore shared];
-        dv_add_menu_items();
+
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
-            [DVHUD show:@"豆包语音已就绪"];
+            dv_dump_menu_classes();
+            dv_probe_menuitems();
+            [DVHUD show:@"探测版就绪"];
         });
     }
 }
