@@ -13,17 +13,35 @@ static NSString *dv_text_of(UIView *view) {
             if (at.length) return at.string;
             return lb.text;
         }
-    } @catch (NSException *e) {
-        NSLog(@"[豆包语音] text异常 %@", e.reason);
-    }
+    } @catch (NSException *e) {}
     return nil;
 }
 
-static void dv_scan(UIView *view) {
-    NSString *t = dv_text_of(view);
-    if (t.length > 0) {
-        NSLog(@"[豆包语音] %@ 文字: %@", NSStringFromClass([view class]), t);
+static BOOL dv_ok(UIView *view) {
+    if (!view) return NO;
+    if (view.window == nil) return NO;
+    @try {
+        CGRect f = view.frame;
+        if (f.size.height < 10 || f.size.width < 24) return NO;
+
+        NSString *cn = NSStringFromClass([view class]);
+        if ([cn containsString:@"Button"]) return NO;
+        if ([cn containsString:@"NavigationBar"]) return NO;
+        if ([cn containsString:@"TabBar"]) return NO;
+        if ([cn containsString:@"Keyboard"]) return NO;
+        if ([cn containsString:@"SearchBar"]) return NO;
+
+        NSString *txt = dv_text_of(view);
+        if (txt.length < 1) return NO;
+        return YES;
+    } @catch (NSException *e) {
+        return NO;
     }
+}
+
+static void dv_scan(UIView *view) {
+    if (!dv_ok(view)) return;
+    NSLog(@"[豆包语音] 通过 %@ : %@", NSStringFromClass([view class]), dv_text_of(view));
 }
 
 %hook UILabel
@@ -38,11 +56,11 @@ static void dv_scan(UIView *view) {
 
 %ctor {
     @autoreleasepool {
-        NSLog(@"[豆包语音] 测试G pid=%d", getpid());
+        NSLog(@"[豆包语音] 测试H pid=%d", getpid());
         [DVStore shared];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
-            [DVHUD show:@"G 就绪"];
+            [DVHUD show:@"H 就绪"];
         });
     }
 }
