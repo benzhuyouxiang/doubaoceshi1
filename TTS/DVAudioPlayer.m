@@ -17,14 +17,19 @@
                                                          channels:1
                                                       interleaved:NO];
             if (!_format) {
-                NSLog(@"[豆包语音] AVAudioFormat 创建失败 sr=%.0f", sr);
+                NSLog(@"[豆包语音] AVAudioFormat 失败 sr=%.0f", sr);
                 return nil;
             }
+
+            AVAudioSession *as = [AVAudioSession sharedInstance];
+            NSLog(@"[豆包语音] session category=%@ mode=%@ 其他app在播=%d",
+                  as.category, as.mode, as.isOtherAudioPlaying);
+
             _engine = [AVAudioEngine new];
             _node = [AVAudioPlayerNode new];
             [_engine attachNode:_node];
             [_engine connect:_node to:_engine.mainMixerNode format:_format];
-            NSLog(@"[豆包语音] 音频管道建好 sr=%.0f fmt=%@", sr, _format);
+            NSLog(@"[豆包语音] 音频管道建好 sr=%.0f", sr);
         } @catch (NSException *e) {
             NSLog(@"[豆包语音] 音频管道异常: %@", e.reason);
             return nil;
@@ -62,13 +67,14 @@
             NSLog(@"[豆包语音] 重试 start=%d err=%@", ok, err);
         }
         [_node play];
+        NSLog(@"[豆包语音] 播放器已启动");
     } @catch (NSException *e) {
         NSLog(@"[豆包语音] start 异常: %@", e.reason);
     }
 }
 
 - (void)appendPCM:(NSData *)pcm {
-    if (pcm.length < 2 || !_format) return;
+    if (pcm.length < 2 || !_format || !_node) return;
 
     NSUInteger frames = pcm.length / 2;
     if (frames == 0) return;
@@ -103,8 +109,8 @@
 - (void)stop {
     _started = NO;
     @try {
-        [_node stop];
-        [_engine stop];
+        if (_node) [_node stop];
+        if (_engine) [_engine stop];
         [[AVAudioSession sharedInstance] setActive:NO
             withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
                   error:nil];
