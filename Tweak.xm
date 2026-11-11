@@ -5,18 +5,8 @@
 #import "TTS/DVTTSEngine.h"
 #import "UI/DVHUD.h"
 #import "UI/DVMenuController.h"
-#import "UI/DVMoreInjector.h"
 #import "Prefs/DVStore.h"
 #import "Prefs/DVSettingsController.h"
-
-@interface WCMoreFunctionViewController : UIViewController
-@end
-
-@interface WCMoreViewController : UIViewController
-@end
-
-@interface MMGrowTextView : UIView
-@end
 
 static const void *kDVTapKey = &kDVTapKey;
 
@@ -43,12 +33,7 @@ static NSString *dv_text_of(UIView *view) {
             if (at.length) return at.string;
             return lb.text;
         }
-        if ([view respondsToSelector:@selector(text)]) {
-            id t = [view performSelector:@selector(text)];
-            if ([t isKindOfClass:[NSString class]] && [(NSString *)t length]) return t;
-        }
     } @catch (NSException *e) {
-        NSLog(@"[豆包语音] dv_text_of 异常 %@", e.reason);
     }
     return nil;
 }
@@ -112,7 +97,6 @@ static void dv_attach(UIView *view) {
         [view addGestureRecognizer:g];
         NSLog(@"[豆包语音] 挂上 %@", NSStringFromClass([view class]));
     } @catch (NSException *e) {
-        NSLog(@"[豆包语音] 挂手势异常 %@", e.reason);
     }
 }
 
@@ -125,12 +109,11 @@ static void dv_attach(UIView *view) {
     @try {
         dv_on_long_press(self, g);
     } @catch (NSException *e) {
-        NSLog(@"[豆包语音] 长按异常 %@", e.reason);
     }
 }
 @end
 
-#pragma mark - hooks
+#pragma mark - 只留两个最安全的 hook
 
 %hook UILabel
 - (void)didMoveToWindow {
@@ -152,74 +135,11 @@ static void dv_attach(UIView *view) {
 }
 %end
 
-%hook UITextField
-- (void)didMoveToWindow {
-    %orig;
-    @try {
-        if (!self.window) return;
-        dv_attach(self);
-    } @catch (NSException *e) {}
-}
-%end
-
-%hook MMGrowTextView
-- (void)didMoveToWindow {
-    %orig;
-    @try {
-        if (!self.window) return;
-        NSLog(@"[豆包语音] 命中 MMGrowTextView");
-        dv_attach(self);
-    } @catch (NSException *e) {}
-}
-%end
-
-#pragma mark - 加号面板
-
-static void dv_try_more(id vcObj) {
-    if (!vcObj) return;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-        if ([vcObj isKindOfClass:[UIViewController class]]) {
-            [DVMoreInjector installInto:(UIViewController *)vcObj];
-        }
-    });
-}
-
-%hook WCMoreFunctionViewController
-- (void)viewDidLoad {
-    %orig;
-    dv_try_more(self);
-}
-%end
-
-%hook WCMoreViewController
-- (void)viewDidLoad {
-    %orig;
-    dv_try_more(self);
-}
-%end
-
-%hook UIViewController
-- (void)viewDidLoad {
-    %orig;
-    @try {
-        NSString *cn = NSStringFromClass([self class]);
-        if ([cn containsString:@"DVMore"]) return;
-        if ([cn containsString:@"More"] || [cn containsString:@"Function"] ||
-            [cn containsString:@"Panel"] || [cn containsString:@"Menu"]) {
-            dv_try_more(self);
-        }
-    } @catch (NSException *e) {}
-}
-%end
-
 #pragma mark - 启动
 
 %ctor {
     @autoreleasepool {
-        NSLog(@"[豆包语音] v1.2.0 已加载 %@ pid=%d longPress=%d",
-              [[NSBundle mainBundle] bundleIdentifier], getpid(),
-              (int)DVEnableLongPress());
+        NSLog(@"[豆包语音] v1.3.0 精简版已加载 pid=%d", getpid());
         [DVStore shared];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)),
                        dispatch_get_main_queue(), ^{
